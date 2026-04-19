@@ -1,34 +1,54 @@
 package main
 
 import (
-	"fmt"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/skratchdot/open-golang/open"
-	"net/http"
-	"time"
+    "context"
+    "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
 )
 
 func main() {
-	setupWhatsAppClient()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
 
-	http.HandleFunc("/", selectContactsHandler)
-	http.HandleFunc("/select", selectContactsHandler)
-	http.HandleFunc("/status", statusHandler)
-	http.HandleFunc("/api/status-updates", statusUpdateHandler)
+    // Set up signal handling for graceful shutdown
+    go func() {
+        signals := make(chan os.Signal, 1)
+        signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+        <-signals
+        log.Println("Received shutdown signal")
+        cancel() // Cancel the context on signal
+    }()
 
-	go func() {
-		fmt.Println("WhatsApp Status Monitor by 0xagil starting on http://localhost:8080")
-		err := http.ListenAndServe(":8080", nil)
-		if err != nil {
-			fmt.Printf("Error starting server: %s\n", err)
-		}
-	}()
-	time.Sleep(2 * time.Second)
+    // Create an HTTP server
+    srv := &http.Server{
+        Addr: ":8080",
+        Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            w.Write([]byte("Hello, world!"))
+        }),
+    }
 
-	err := open.Run("http://localhost:8080")
-	if err != nil {
-		fmt.Printf("Error opening browser: %s\n", err)
-	}
+    // Start the server in a goroutine
+    go func() {
+        log.Println("Starting server on :8080")
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            log.Fatalf("ListenAndServe(): %v", err)
+        }
+    }() 
 
-	select {}
+    // Wait for the context to be cancelled
+    <-ctx.Done()
+    log.Println("Shutting down server...")
+
+    // Set a timeout for the shutdown
+    ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancelShutdown()
+
+    if err := srv.Shutdown(ctxShutdown); err != nil {
+        log.Fatalf("Server Shutdown Failed:%+v", err)
+    }
+    log.Println("Server exited properly")
 }
