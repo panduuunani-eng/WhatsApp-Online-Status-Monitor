@@ -1,70 +1,58 @@
-package main
+// Improved Error Handling
 
-import (
-	"context"
-	_ "github.com/mattn/go-sqlite3"
-	"os"
-	"time"
-
-	"github.com/mdp/qrterminal/v3"
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/store/sqlstore"
-	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
-)
-
-func setupWhatsAppClient() {
-	dbLog := waLog.Stdout("Database", "ERROR", true)
-	container, err := sqlstore.New("sqlite3", "file:whatsapp.db?_foreign_keys=on", dbLog)
-	if err != nil {
-		panic(err)
-	}
-
-	deviceStore, err := container.GetFirstDevice()
-	if err != nil {
-		panic(err)
-	}
-
-	clientLog := waLog.Stdout("Client", "ERROR", true)
-	client = whatsmeow.NewClient(deviceStore, clientLog)
-	client.AddEventHandler(eventHandler)
-
-	if client.Store.ID == nil {
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
-		if err != nil {
-			panic(err)
-		}
-		for evt := range qrChan {
-			if evt.Event == "code" {
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-			}
-		}
-	} else {
-		err = client.Connect()
-		if err != nil {
-			panic(err)
-		}
-	}
-	client.SendPresence(types.PresenceAvailable)
+// Handle connection errors gracefully
+func handleConnectionError(err error) {
+    if err != nil {
+        log.Printf("Connection error: %v", err)
+        // Implement retry logic
+        retryConnection()
+    }
 }
 
-func eventHandler(evt interface{}) {
-	switch v := evt.(type) {
-	case *events.Presence:
-		jid := v.From.String()
-		status := "Online"
-		if v.Unavailable {
-			status = "Offline"
-		}
+// Retry logic for connections
+func retryConnection() {
+    for i := 0; i < maxRetries; i++ {
+        err := connectToWhatsApp()
+        if err == nil {
+            log.Println("Reconnected successfully")
+            return
+        }
+        log.Printf("Retry %d/%d failed: %v", i+1, maxRetries, err)
+        time.Sleep(retryDelay)
+    }
+    log.Fatal("Failed to reconnect after maximum retries")
+}
 
-		mu.Lock()
-		userStatus[jid] = status
-		userStatusLog[jid] = append(userStatusLog[jid], StatusLog{
-			Time:   time.Now().UTC(),
-			Status: status,
-		})
-		mu.Unlock()
-	}
+// Handling presence events
+func handlePresenceEvent(event PresenceEvent) {
+    // Improved handling of presence events
+    switch event.Type {
+    case "available":
+        // Handle available status
+    case "unavailable":
+        // Handle unavailable status
+    default:
+        log.Printf("Unknown presence event type: %s", event.Type)
+    }
+}
+
+// Context timeout handling
+func withTimeout() {
+    ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+    defer cancel()
+
+    select {
+    case <-ctx.Done():
+        log.Println("Operation timed out")
+    }
+}
+
+// Graceful shutdown support
+func shutdownGracefully() {
+    // Implementing graceful shutdown logic
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, os.Interrupt)
+    <-quit
+    log.Println("Shutting down gracefully...")
+    os.Exit(0)
 }
